@@ -215,5 +215,13 @@ int main(int argc, char *argv[]) {
   if (argc > 1) {
     fclose(fp);
   }
+  for (size_t i = 0; i < path.num_paths; ++i) {
+    if (path.paths[i]) {
+      free(path.paths[i]);
+      path.paths[i] = NULL;
+    } else {
+      break;
+    }
+  }
   return 0;
 }
