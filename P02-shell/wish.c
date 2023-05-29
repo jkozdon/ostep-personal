@@ -84,31 +84,10 @@ void update_path(char **p_cmd_args, path_t *path) {
 #endif
 }
 
-void system_call(char *next_cmd, char **p_next_cmd_args, path_t *path) {
-  char *p_cmd_args = *p_next_cmd_args;
-
-  char *cmd = get_next_token(&next_cmd, "&");
-  if (next_cmd != NULL) {
-    /* cmd has & */
-    if (next_cmd[0] == '\0') {
-      next_cmd = get_next_token(p_next_cmd_args, NULL);
-    }
-    p_cmd_args = NULL;
-  } else if (*p_next_cmd_args[0] == '&') {
-    /* first argument is & */
-    *p_next_cmd_args[0] = ' ';
-    next_cmd = get_next_token(p_next_cmd_args, NULL);
-    p_cmd_args = NULL;
-  } else {
-    /* split out argument & */
-    p_cmd_args = get_next_token(p_next_cmd_args, "&");
-    next_cmd = get_next_token(p_next_cmd_args, NULL);
-  }
-
+pid_t system_call(char *cmd, char **p_cmd_args, path_t *path) {
   /* Launch the cmd by first searching the path, if found parse the argument */
   size_t max_len = path->max_path_len + strlen(cmd) + 2;
   char cmd_path[max_len];
-  int found = 0;
   for (size_t i = 0; path->paths[i]; ++i) {
 
     snprintf(cmd_path, max_len, "%s/%s", path->paths[i], cmd);
@@ -121,15 +100,13 @@ void system_call(char *next_cmd, char **p_next_cmd_args, path_t *path) {
       argv[0] = cmd;
       char *arg;
       size_t arg_num = 1;
-      if (p_cmd_args) {
-        while ((arg = get_next_token(&p_cmd_args, NULL))) {
-          if (arg_num + 1 == max_args) {
-            max_args *= 2;
-            argv = realloc(argv, max_args * sizeof(char *));
-          }
-          argv[arg_num] = arg;
-          ++arg_num;
+      while ((arg = get_next_token(p_cmd_args, NULL))) {
+        if (arg_num + 1 == max_args) {
+          max_args *= 2;
+          argv = realloc(argv, max_args * sizeof(char *));
         }
+        argv[arg_num] = arg;
+        ++arg_num;
       }
       argv[arg_num] = NULL;
 #ifdef DEBUG
@@ -143,29 +120,20 @@ void system_call(char *next_cmd, char **p_next_cmd_args, path_t *path) {
 #endif
 
       /* launch cmd */
-      int rc = fork();
-      if (rc < 0) {
+      pid_t child_pid = fork();
+      if (child_pid < 0) {
         ERROR_MSG();
-      } else if (rc == 0) {
+      } else if (child_pid == 0) {
         execv(cmd_path, argv);
       }
 
-      /* recurse if we have another command */
-      if (next_cmd) {
-        system_call(next_cmd, p_next_cmd_args, path);
-      }
-
-      waitpid(rc, NULL, WUNTRACED);
-      found = 1;
       free(argv);
-
-      break;
+      return child_pid;
     }
   }
 
-  if (!found) {
-    ERROR_MSG();
-  }
+  ERROR_MSG();
+  return -1;
 }
 
 int main(int argc, char *argv[]) {
@@ -187,6 +155,8 @@ int main(int argc, char *argv[]) {
   strncpy(path.paths[0], base_path, sizeof(base_path));
   path.max_path_len = sizeof(base_path);
 
+  size_t num_child_pids = 10;
+  pid_t *child_pids = calloc(num_child_pids, sizeof(pid_t));
   while (1) {
     if (argc == 1) {
       printf("wish> ");
@@ -194,24 +164,42 @@ int main(int argc, char *argv[]) {
     if (getline(&line, &len, fp) < 0) {
       break;
     }
-    char *cmd_args = line;
-    char *cmd = get_next_token(&cmd_args, NULL);
 
-    /* If no cmd just loop */
-    if (cmd == NULL) {
-      continue;
+
+    char *cmds = line;
+    char *first_cmd = NULL;
+    size_t count = 0;
+    while ((first_cmd = get_next_token(&cmds, "&"))) {
+      char *cmd = get_next_token(&first_cmd, NULL);
+
+      /* If no cmd just loop */
+      if (cmd == NULL) {
+        continue;
+      }
+
+      if (strncmp("exit", cmd, 4) == 0) {
+        goto DONE;
+      } else if (strncmp("path", cmd, 4) == 0) {
+        update_path(&first_cmd, &path);
+      } else if (strncmp("cd", cmd, 2) == 0) {
+        change_directory(&first_cmd);
+      } else {
+        if (count + 1 > num_child_pids) {
+          num_child_pids *= 2;
+          child_pids = realloc(child_pids, num_child_pids * sizeof(pid_t));
+        }
+        /* TODO: call parse command => split redirect in command => recurse */
+        child_pids[count] = system_call(cmd, &first_cmd, &path);
+        ++count;
+      }
     }
-
-    if (strncmp("exit", cmd, 4) == 0) {
-      break;
-    } else if (strncmp("path", cmd, 4) == 0) {
-      update_path(&cmd_args, &path);
-    } else if (strncmp("cd", cmd, 2) == 0) {
-      change_directory(&cmd_args);
-    } else {
-      system_call(cmd, &cmd_args, &path);
+    for (size_t i = 0; i < count; ++i) {
+      if (child_pids[i] > 0) {
+        waitpid(child_pids[i], NULL, WUNTRACED);
+      }
     }
   }
+DONE:
   if (argc > 1) {
     fclose(fp);
   }
@@ -223,5 +211,7 @@ int main(int argc, char *argv[]) {
       break;
     }
   }
+  free(path.paths);
+  free(child_pids);
   return 0;
 }
