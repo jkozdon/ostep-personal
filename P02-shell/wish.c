@@ -5,6 +5,14 @@
 
 #define DEBUG
 
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+typedef struct path_struct {
+  char **paths;
+  size_t num_paths;
+  size_t max_path_len;
+} path_t;
+
 #define ERROR_MSG()                                                            \
   do {                                                                         \
     char error_message[30] = "An error has occurred\n";                        \
@@ -33,47 +41,47 @@ void change_directory(char **p_cmd_args) {
 #endif
 }
 
-char **update_path(char **p_cmd_args, char **path, size_t *path_len) {
+void update_path(char **p_cmd_args, path_t *path) {
   /* Free old path */
-  for (size_t i = 0; i < *path_len; ++i) {
-    if (path[i]) {
-      free(path[i]);
-      path[i] = NULL;
+  for (size_t i = 0; i < path->num_paths; ++i) {
+    if (path->paths[i]) {
+      free(path->paths[i]);
+      path->paths[i] = NULL;
     } else {
       break;
     }
   }
+  path->max_path_len = 0;
   char *dir;
   size_t count = 0;
   while ((dir = get_next_token(p_cmd_args))) {
     /* If path isn't big enough, double the array */
-    if (count + 1 >= *path_len) {
-      *path_len *= 2;
-      path = realloc(path, *path_len * sizeof(char *));
-      for (size_t i = count; i < *path_len; ++i) {
-        path[i] = NULL;
+    if (count + 1 >= path->num_paths) {
+      path->num_paths *= 2;
+      path->paths = realloc(path->paths, path->num_paths * sizeof(char *));
+      for (size_t i = count; i < path->num_paths; ++i) {
+        path->paths[i] = NULL;
       }
     }
     /* Add new directory */
-    size_t dir_len = strlen(dir) + 10;
-    path[count] = (char *)malloc(dir_len * sizeof(char));
-    strncpy(path[count], dir, dir_len);
+    size_t dir_len = strlen(dir) + 1;
+    path->max_path_len = MAX(path->max_path_len, dir_len - 1);
+    path->paths[count] = (char *)malloc(dir_len * sizeof(char));
+    strncpy(path->paths[count], dir, dir_len);
     ++count;
   }
 
 #ifdef DEBUG
-  printf("path (len = %ld): ", *path_len);
-  for (size_t i = 0; i < *path_len; ++i) {
-    if (path[i]) {
-      printf(" %s", path[i]);
+  printf("path (len = %ld, max = %ld): ", path->num_paths, path->max_path_len);
+  for (size_t i = 0; i < path->num_paths; ++i) {
+    if (path->paths[i]) {
+      printf(" %s", path->paths[i]);
     } else {
       break;
     }
   }
   printf("\n");
 #endif
-
-  return path;
 }
 
 int main(int argc, char *argv[]) {
@@ -86,11 +94,12 @@ int main(int argc, char *argv[]) {
 
   char *line = NULL;
   size_t len = 0;
-  size_t path_len = 10;
-  char **path = calloc(path_len, sizeof(char *));
+  path_t path;
+  path.num_paths = 10;
+  path.paths = calloc(path.num_paths, sizeof(char *));
   const char base_path[] = "/bin";
-  path[0] = malloc(sizeof(base_path));
-  strncpy(path[0], base_path, sizeof(base_path));
+  path.paths[0] = malloc(sizeof(base_path));
+  strncpy(path.paths[0], base_path, sizeof(base_path));
   while (1) {
     if (argc == 1) {
       printf("wish> ");
@@ -109,7 +118,7 @@ int main(int argc, char *argv[]) {
     if (strncmp("exit", cmd, 4) == 0) {
       break;
     } else if (strncmp("path", cmd, 4) == 0) {
-      path = update_path(&cmd_args, path, &path_len);
+      update_path(&cmd_args, &path);
     } else if (strncmp("cd", cmd, 2) == 0) {
       change_directory(&cmd_args);
     } else {
