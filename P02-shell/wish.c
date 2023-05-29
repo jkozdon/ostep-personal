@@ -84,28 +84,52 @@ void update_path(char **p_cmd_args, path_t *path) {
 #endif
 }
 
-void system_call(char *cmd, char **p_cmd_args, path_t *path) {
+void system_call(char *next_cmd, char **p_next_cmd_args, path_t *path) {
+  char *p_cmd_args = *p_next_cmd_args;
+
+  char *cmd = get_next_token(&next_cmd, "&");
+  if (next_cmd != NULL) {
+    /* cmd has & */
+    if (next_cmd[0] == '\0') {
+      next_cmd = get_next_token(p_next_cmd_args, NULL);
+    }
+    p_cmd_args = NULL;
+  } else if (*p_next_cmd_args[0] == '&') {
+    /* first argument is & */
+    *p_next_cmd_args[0] = ' ';
+    next_cmd = get_next_token(p_next_cmd_args, NULL);
+    p_cmd_args = NULL;
+  } else {
+    /* split out argument & */
+    p_cmd_args = get_next_token(p_next_cmd_args, "&");
+    next_cmd = get_next_token(p_next_cmd_args, NULL);
+  }
+
+  /* Launch the cmd by first searching the path, if found parse the argument */
   size_t max_len = path->max_path_len + strlen(cmd) + 2;
   char cmd_path[max_len];
-
   int found = 0;
   for (size_t i = 0; path->paths[i]; ++i) {
+
     snprintf(cmd_path, max_len, "%s/%s", path->paths[i], cmd);
+
     if (!access(cmd_path, X_OK)) {
-      /* parse arguments */
+      /* parse arguments into argv array */
       char **argv;
       size_t max_args = 10;
       argv = malloc(max_args * sizeof(char *));
       argv[0] = cmd;
       char *arg;
       size_t arg_num = 1;
-      while ((arg = get_next_token(p_cmd_args, NULL))) {
-        if (arg_num + 1 == max_args) {
-          max_args *= 2;
-          argv = realloc(argv, max_args * sizeof(char *));
+      if (p_cmd_args) {
+        while ((arg = get_next_token(&p_cmd_args, NULL))) {
+          if (arg_num + 1 == max_args) {
+            max_args *= 2;
+            argv = realloc(argv, max_args * sizeof(char *));
+          }
+          argv[arg_num] = arg;
+          ++arg_num;
         }
-        argv[arg_num] = arg;
-        ++arg_num;
       }
       argv[arg_num] = NULL;
 #ifdef DEBUG
@@ -117,20 +141,28 @@ void system_call(char *cmd, char **p_cmd_args, path_t *path) {
       }
       printf("\n");
 #endif
-      /* launch cmds */
+
+      /* launch cmd */
       int rc = fork();
       if (rc < 0) {
         ERROR_MSG();
       } else if (rc == 0) {
         execv(cmd_path, argv);
-      } else {
-        waitpid(rc, NULL, WUNTRACED);
       }
+
+      /* recurse if we have another command */
+      if (next_cmd) {
+        system_call(next_cmd, p_next_cmd_args, path);
+      }
+
+      waitpid(rc, NULL, WUNTRACED);
       found = 1;
       free(argv);
+
       break;
     }
   }
+
   if (!found) {
     ERROR_MSG();
   }
