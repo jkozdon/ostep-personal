@@ -19,17 +19,17 @@ typedef struct path_struct {
     write(STDERR_FILENO, error_message, strlen(error_message));                \
   } while (0)
 
-char *get_next_token(char **line) {
+char *get_next_token(char **line, const char *sep) {
   char *tok;
   do {
-    tok = strsep(line, " \t\n");
+    tok = strsep(line, sep ? sep : " \t\n");
   } while (tok != NULL && tok[0] == '\0');
   return tok;
 }
 
 void change_directory(char **p_cmd_args) {
-  char *dir = get_next_token(p_cmd_args);
-  get_next_token(p_cmd_args);
+  char *dir = get_next_token(p_cmd_args, NULL);
+  get_next_token(p_cmd_args, NULL);
   if (*p_cmd_args != NULL || dir == NULL || chdir(dir)) {
     ERROR_MSG();
   }
@@ -54,7 +54,7 @@ void update_path(char **p_cmd_args, path_t *path) {
   path->max_path_len = 0;
   char *dir;
   size_t count = 0;
-  while ((dir = get_next_token(p_cmd_args))) {
+  while ((dir = get_next_token(p_cmd_args, NULL))) {
     /* If path isn't big enough, double the array */
     if (count + 1 >= path->num_paths) {
       path->num_paths *= 2;
@@ -84,6 +84,58 @@ void update_path(char **p_cmd_args, path_t *path) {
 #endif
 }
 
+void system_call(char *cmd, char **p_cmd_args, path_t *path) {
+  size_t max_len = path->max_path_len + strlen(cmd) + 2;
+  char cmd_path[max_len];
+
+  int found = 0;
+  for (size_t i = 0; path->paths[i]; ++i) {
+    snprintf(cmd_path, max_len, "%s/%s", path->paths[i], cmd);
+    if (!access(cmd_path, X_OK)) {
+      /* parse arguments */
+      char **argv;
+      size_t max_args = 10;
+      argv = malloc(max_args * sizeof(char *));
+      argv[0] = cmd;
+      char *arg;
+      size_t arg_num = 1;
+      while ((arg = get_next_token(p_cmd_args, NULL))) {
+        if (arg_num + 1 == max_args) {
+          max_args *= 2;
+          argv = realloc(argv, max_args * sizeof(char *));
+        }
+        argv[arg_num] = arg;
+        ++arg_num;
+      }
+      argv[arg_num] = NULL;
+#ifdef DEBUG
+      printf("sys_cmd: %s", cmd_path);
+      arg_num = 1;
+      while (argv[arg_num]) {
+        printf(" %s", argv[arg_num]);
+        ++arg_num;
+      }
+      printf("\n");
+#endif
+      /* launch cmds */
+      int rc = fork();
+      if (rc < 0) {
+        ERROR_MSG();
+      } else if (rc == 0) {
+        execv(cmd_path, argv);
+      } else {
+        waitpid(rc, NULL, WUNTRACED);
+      }
+      found = 1;
+      free(argv);
+      break;
+    }
+  }
+  if (!found) {
+    ERROR_MSG();
+  }
+}
+
 int main(int argc, char *argv[]) {
   FILE *fp = argc == 1 ? stdin : fopen(argv[1], "r");
 
@@ -94,12 +146,15 @@ int main(int argc, char *argv[]) {
 
   char *line = NULL;
   size_t len = 0;
+
   path_t path;
   path.num_paths = 10;
   path.paths = calloc(path.num_paths, sizeof(char *));
   const char base_path[] = "/bin";
   path.paths[0] = malloc(sizeof(base_path));
   strncpy(path.paths[0], base_path, sizeof(base_path));
+  path.max_path_len = sizeof(base_path);
+
   while (1) {
     if (argc == 1) {
       printf("wish> ");
@@ -108,7 +163,7 @@ int main(int argc, char *argv[]) {
       break;
     }
     char *cmd_args = line;
-    char *cmd = get_next_token(&cmd_args);
+    char *cmd = get_next_token(&cmd_args, NULL);
 
     /* If no cmd just loop */
     if (cmd == NULL) {
@@ -122,7 +177,7 @@ int main(int argc, char *argv[]) {
     } else if (strncmp("cd", cmd, 2) == 0) {
       change_directory(&cmd_args);
     } else {
-      printf("TODO: system command\n");
+      system_call(cmd, &cmd_args, &path);
     }
   }
   if (argc > 1) {
