@@ -165,12 +165,13 @@ int main(int argc, char *argv[]) {
       break;
     }
 
-
     char *cmds = line;
-    char *first_cmd = NULL;
+    char *current = NULL;
     size_t count = 0;
-    while ((first_cmd = get_next_token(&cmds, "&"))) {
-      char *cmd = get_next_token(&first_cmd, NULL);
+    while ((current = get_next_token(&cmds, "&"))) {
+      char *cmd_args = get_next_token(&current, ">");
+      /* char *redirect = current; */
+      char *cmd = get_next_token(&cmd_args, NULL);
 
       /* If no cmd just loop */
       if (cmd == NULL) {
@@ -180,16 +181,16 @@ int main(int argc, char *argv[]) {
       if (strncmp("exit", cmd, 4) == 0) {
         goto DONE;
       } else if (strncmp("path", cmd, 4) == 0) {
-        update_path(&first_cmd, &path);
+        update_path(&cmd_args, &path);
       } else if (strncmp("cd", cmd, 2) == 0) {
-        change_directory(&first_cmd);
+        change_directory(&cmd_args);
       } else {
         if (count + 1 > num_child_pids) {
           num_child_pids *= 2;
           child_pids = realloc(child_pids, num_child_pids * sizeof(pid_t));
         }
-        /* TODO: call parse command => split redirect in command => recurse */
-        child_pids[count] = system_call(cmd, &first_cmd, &path);
+        /* TODO: pass redirect and use in system_call */
+        child_pids[count] = system_call(cmd, &cmd_args, &path);
         ++count;
       }
     }
