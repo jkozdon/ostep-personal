@@ -195,6 +195,10 @@ int main(int argc, char *argv[]) {
       }
 
       if (strncmp("exit", cmd, 4) == 0) {
+        if (get_next_token(&cmd_args, NULL)) {
+          ERROR_MSG();
+          continue;
+        }
         goto DONE;
       } else if (strncmp("path", cmd, 4) == 0) {
         update_path(&cmd_args, &path);
