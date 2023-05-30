@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/fcntl.h>
 #include <unistd.h>
 
-#define DEBUG
+/* #define DEBUG */
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
@@ -84,7 +85,7 @@ void update_path(char **p_cmd_args, path_t *path) {
 #endif
 }
 
-pid_t system_call(char *cmd, char **p_cmd_args, path_t *path) {
+pid_t system_call(char *cmd, char **p_cmd_args, path_t *path, char *redirect) {
   /* Launch the cmd by first searching the path, if found parse the argument */
   size_t max_len = path->max_path_len + strlen(cmd) + 2;
   char cmd_path[max_len];
@@ -124,6 +125,13 @@ pid_t system_call(char *cmd, char **p_cmd_args, path_t *path) {
       if (child_pid < 0) {
         ERROR_MSG();
       } else if (child_pid == 0) {
+        if (redirect) {
+          close(STDOUT_FILENO);
+          if (open(redirect, O_WRONLY | O_TRUNC | O_CREAT, 0644) < 0) {
+            ERROR_MSG();
+            exit(-1);
+          }
+        }
         execv(cmd_path, argv);
       }
 
@@ -170,8 +178,16 @@ int main(int argc, char *argv[]) {
     size_t count = 0;
     while ((current = get_next_token(&cmds, "&"))) {
       char *cmd_args = get_next_token(&current, ">");
-      /* char *redirect = current; */
       char *cmd = get_next_token(&cmd_args, NULL);
+      char *redirect = NULL;
+      if (current) {
+        redirect = get_next_token(&current, NULL);
+        /* check that there is a file and only a file */
+        if (get_next_token(&current, NULL) || !redirect) {
+          ERROR_MSG();
+          continue;
+        }
+      }
 
       /* If no cmd just loop */
       if (cmd == NULL) {
@@ -189,8 +205,7 @@ int main(int argc, char *argv[]) {
           num_child_pids *= 2;
           child_pids = realloc(child_pids, num_child_pids * sizeof(pid_t));
         }
-        /* TODO: pass redirect and use in system_call */
-        child_pids[count] = system_call(cmd, &cmd_args, &path);
+        child_pids[count] = system_call(cmd, &cmd_args, &path, redirect);
         ++count;
       }
     }
