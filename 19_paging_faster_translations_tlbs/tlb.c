@@ -1,3 +1,8 @@
+#define _GNU_SOURCE
+#include <err.h>
+#include <errno.h>
+#include <pthread.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +14,13 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "usage: %s <num pages> <num trials>\n", argv[0]);
     return 1;
   }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(0, &cpuset);
+  pthread_t thread = pthread_self();
+  pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
+
   size_t num_pages = (size_t)atoi(argv[1]);
   size_t num_trials = (size_t)atoi(argv[2]);
   size_t len = num_pages * PAGE_SIZE;
@@ -29,7 +41,7 @@ int main(int argc, char *argv[]) {
   en.tv_nsec -= st.tv_nsec;
   double elapsed = (double)(en.tv_sec * 1000000000 + en.tv_nsec) /
                    (double)(num_trials * num_pages);
-  printf("time per access: %e\n", elapsed);
+  printf("(num pages, time per access): (%*zu, %e)\n", 5, num_pages, elapsed);
 
   free(x);
 
